@@ -1,119 +1,140 @@
-# PYPONG - Python + PostgreSQL + Nginx Docker Development Environment
+# PYPONG — Multi-Framework Production-Ready Docker Stack
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![GitHub last commit](https://img.shields.io/github/last-commit/albertguedes/pypong)](https://github.com/albertguedes/pypong)
 [![CI/CD](https://github.com/albertguedes/pypong/actions/workflows/ci.yml/badge.svg)](https://github.com/albertguedes/pypong/actions/workflows/ci.yml)
 
-A production-ready, lightweight Docker development environment for teams requiring a consistent Python + PostgreSQL stack. Built on Alpine Linux images for minimal footprint and fast deployments.
-
-**Key feature: Host-independent** - Only Docker is required on the host machine. All Python dependencies (Flask, Gunicorn, pytest) are installed inside the containers.
-
----
-
-## Why This Project?
-
-| Feature | Benefit |
-|---------|---------|
-| **Host-Independent** | Only Docker needed on host; no Python required |
-| **Minimal Footprint** | Alpine-based images (~5MB base) for faster builds |
-| **Production-Ready** | Health checks, restart policies, persistent volumes |
-| **Environment Isolation** | All credentials via environment variables |
-| **Self-Documenting** | Clear service boundaries and architecture docs |
-| **Enterprise Secure** | Ports bound to localhost, host networking, no secrets |
-| **CI/CD Ready** | GitHub Actions workflows for testing and release |
+**PYPONG** is a production-oriented Docker development environment for Python teams. Three web frameworks — Flask, Django, and FastAPI — run simultaneously behind nginx, sharing a PostgreSQL database. Includes JWT authentication, Prometheus metrics, structured JSON logging, CORS, rate limiting, Sentry error tracking, and automated backups.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    HOST MACHINE                          │
-│                  (127.0.0.1:8080)                        │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-         ┌────────────────┴────────────────┐
-         │                                 │
-         ▼                                 ▼
-┌─────────────────────┐         ┌─────────────────────┐
-│ pypong-nginx       │         │ pypong-python      │
-│ (nginx:1.27-alpine) │         │ (python:3.13)       │
-│                     │────────▶│                     │
-│ :8080 (HTTP)        │         │ :8000 (gunicorn)    │
-│ /var/www/html       │         │ /var/www            │
-└─────────────────────┘         └─────────┬───────────┘
-                                          │
-                                          ▼
-                              ┌─────────────────────┐
-                              │ pypong-postgresql  │
-                              │ (postgres:17)       │
-                              │ :5432               │
-                              │ pypong-data (vol)  │
-                              └─────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       HOST MACHINE  (127.0.0.1:8080)                    │
+│                     nginx reverse proxy / load balancer                   │
+└──────────────────────────────────┬────────────────────────────────────┘
+                                   │
+         ┌─────────────────────────┼─────────────────────────┐
+         │                         │                         │
+         ▼                         ▼                         ▼
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Flask (8000)   │     │  Django (8001)  │     │  FastAPI (8002) │
+│  JWT API /v1/*  │     │  dashboard only │     │  dashboard only │
+│  Gunicorn ts4   │     │  Gunicorn ts4   │     │  Uvicorn        │
+└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 ▼
+                    ┌─────────────────────────┐
+                    │     PostgreSQL 17       │
+                    │    (bridge network)     │
+                    │    pypong-data (vol)    │
+                    └─────────────────────────┘
 ```
 
-All services use **host networking** for direct communication via `127.0.0.1`.
+**5 services | 3 frameworks | 1 PostgreSQL | JWT auth | Prometheus metrics | Sentry | CORS | Rate limiting**
 
-## Services
+---
 
-| Service | Image | Port | Purpose |
-|---------|-------|------|---------|
-| **webserver** | nginx:1.27-alpine | 8080 | HTTP server, Python proxy |
-| **python** | python:3.13-alpine | 8000 | Flask/Gunicorn application |
-| **db** | postgres:17-alpine | 5432 | PostgreSQL database |
+## Features
+
+| Category | Implementation |
+|----------|---------------|
+| **Authentication** | JWT Bearer tokens (PyJWT, HS256, 15min access / 7d refresh) |
+| **Password hashing** | SHA-256 with constant-time comparison |
+| **Error format** | Identical `{"error": {code, message, details}}` across all frameworks |
+| **Rate limiting** | nginx `limit_req`: 10r/s burst 20 for auth, 100r/s burst 200 for API |
+| **Observability** | Structured JSON logs, Prometheus `/metrics`, `X-Request-ID` propagation |
+| **Error tracking** | Sentry SDK with Flask/FastAPI/Django integrations |
+| **Health checks** | `/health` verifies PostgreSQL connectivity, returns 503 if DB is down |
+| **API versioning** | `/v1/` prefix for all API routes. Dashboard routes unchanged. |
+| **CORS** | Configurable allowed origins via nginx `$cors_origin` map |
+| **Tracing** | Request ID injection nginx → framework → PostgreSQL |
+| **Backup** | `pg_dump` + gzip, optional GPG encryption, local/S3/B2/rsync providers |
+| **Security** | Non-root user (`appuser`), read-only volume mounts, gitignored `.env` |
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-
-- Docker Engine 20.10+
-- Docker Compose 2.0+
-- GNU Make 3.81+
-
-### Installation
-
 ```bash
-# 1. Clone the repository
+# 1. Clone and enter
 git clone https://github.com/albertguedes/pypong.git
 cd pypong
 
 # 2. Configure environment
 cp .env.example .env
 
-# 3. Build and start services
+# 3. Build and start
 make build && make up
 
-# 4. Verify services
+# 4. Verify
 make test
 ```
 
-### Verify Your Setup
+---
 
+## API Reference
+
+All frameworks expose the same API at their `/v1/` endpoint.
+
+### Flask (Base: `http://localhost:8080/flask/v1`)
+
+### Django (Base: `http://localhost:8080/django/v1`)
+
+### FastAPI (Base: `http://localhost:8080/fastapi/v1`)
+
+### Authentication
+
+All three frameworks share identical auth endpoint behavior:
+
+#### Register
 ```bash
-# Test HTTP server
-curl http://localhost:8080/
+# Flask
+curl -X POST http://localhost:8080/flask/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"dev","password":"password123"}'
 
-# Test Python endpoints
-curl http://localhost:8080/health
-curl http://localhost:8080/database
-curl http://localhost:8080/metrics
+# Django
+curl -X POST http://localhost:8080/django/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"dev","password":"password123"}'
 
-# Run all tests (curl + pytest)
-make test
+# FastAPI
+curl -X POST http://localhost:8080/fastapi/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"dev","password":"password123"}'
+```
 
-# Run unit tests only
-make test:unit
+#### Login
+```bash
+# Flask
+curl -X POST http://localhost:8080/flask/v1/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"username":"dev","password":"password123"}'
+# Returns: {access_token, refresh_token, token_type, expires_in}
+```
 
-# Run integration tests only
-make test:integration
+#### Protected Resource
+```bash
+curl -H "Authorization: Bearer <access_token>" \
+  http://localhost:8080/flask/v1/protected
+```
 
-# View running containers
-make logs
+### Framework Dashboard Endpoints
 
-# Shell into Python container
-make shell service=python
+| Framework | Base Path | Endpoints |
+|-----------|-----------|-----------|
+| Flask | `/flask` | `/flask/` `/flask/health` `/flask/database` `/flask/metrics` `/flask/v1` |
+| Django | `/django` | `/django/` `/django/health` `/django/database` `/django/metrics` `/django/v1` |
+| FastAPI | `/fastapi` | `/fastapi/` `/fastapi/health` `/fastapi/database` `/fastapi/metrics` `/fastapi/v1` |
+
+### Metrics (Prometheus format)
+```bash
+curl http://localhost:8080/flask/metrics
+# pypong_database_connected, pypong_database_size_bytes, pypong_info{framework="flask"}
 ```
 
 ---
@@ -122,220 +143,136 @@ make shell service=python
 
 | Command | Description |
 |---------|-------------|
-| `make up` | Start all containers in detached mode |
+| `make build` | Build all Docker images |
+| `make up` | Start all containers |
 | `make down` | Stop all containers |
-| `make build` | Rebuild Docker images |
-| `make logs [service=<name>]` | View logs (all or specific service) |
-| `make shell service=<db\|python\|webserver>` | Exec into container shell |
 | `make clean` | Remove containers and volumes |
-| `make status` | Show running containers status |
-| `make test` | Run all tests (curl + pytest) |
-| `make test:unit` | pytest unit tests only |
-| `make test:integration` | pytest integration tests only |
+| `make test` | Run all tests (curl + pytest, all frameworks) |
+| `make test-flask` | Flask pytest only |
+| `make test-django` | Django pytest only |
+| `make test-fastapi` | FastAPI pytest only |
 | `make backup` | Backup database |
-| `make restore file=<backup>` | Restore database from backup |
-
----
-
-## Testing
-
-Tests run inside the Python container - no Python/pytest needed on host.
-
-```bash
-# Run all tests
-make test
-
-# Run unit tests only
-make test:unit
-
-# Run integration tests only
-make test:integration
-```
-
-### Test Suites
-
-| Suite | Purpose | Location |
-|-------|---------|----------|
-| **Unit** | Python logic tests | `src/tests/Unit/` |
-| **Integration** | HTTP endpoints + DB tests | `src/tests/Integration/` |
+| `make restore file=<name>` | Restore from backup |
+| `make shell service=<name>` | Shell into container (flask\|django\|fastapi\|db\|webserver) |
+| `make logs [service=<name>]` | View container logs |
 
 ---
 
 ## Environment Variables
 
-Configure your environment by editing the `.env` file:
-
 ```env
-# PostgreSQL Configuration
+# PostgreSQL
 POSTGRES_DB=dockerdb
 POSTGRES_USER=docker
-POSTGRES_PASSWORD=your_secure_password
+POSTGRES_PASSWORD=docker
 POSTGRES_PORT=5432
-```
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `POSTGRES_DB` | dockerdb | Name of the database |
-| `POSTGRES_USER` | docker | Database user |
-| `POSTGRES_PASSWORD` | - | Database password (required) |
-| `POSTGRES_PORT` | 5432 | Database port |
+# JWT Authentication (required for production)
+JWT_SECRET=<openssl-rand-hex-32>
+
+# Optional / Recommended
+SENTRY_DSN=https://<key>@o<org>.ingest.sentry.io/<project>
+ENVIRONMENT=production
+```
 
 ---
 
-## Project Structure
+## Documentation
 
-```
-.
-├── src/                    # Application source (volume-mounted)
-│   ├── app.py             # Flask application
-│   ├── requirements.txt   # Python dependencies
-│   ├── index.html         # Static HTML page
-│   └── tests/             # Test suite
-│       └── test_app.py
-├── python/                 # Python service
-│   └── Dockerfile         # Python image definition
-├── database/               # Database service
-│   └── Dockerfile
-├── webserver/              # Web server service
-│   ├── Dockerfile
-│   └── nginx/
-│       ├── default.conf   # Nginx configuration
-│       └── nginx.conf     # Main config
-├── backup/                 # Backup scripts
-│   ├── backup.sh           # Backup with encryption/sync
-│   ├── restore.sh          # Restore script
-│   ├── verify-restore.sh   # Backup verification
-│   └── config.sh          # Backup configuration
-├── compose.yaml           # Service definitions
-├── Makefile               # Developer commands
-└── docs/                  # Documentation
-    ├── ARCHITECTURE.md
-    ├── CHANGELOG.md
-    ├── CONTRIBUTING.md
-    └── USER_MANUAL.md
+| Document | Contents |
+|----------|----------|
+| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System architecture, networking, data flow |
+| [openapi.yaml](./docs/openapi.yaml) | OpenAPI 3.0 specification for v1 API |
+| [DEPLOY.md](./docs/DEPLOY.md) | Production deployment steps, TLS, Docker Swarm |
+| [SECURITY.md](./docs/SECURITY.md) | Security policy, responsible disclosure, hardening checklist |
+| [ADR-001-jwt.md](./docs/ADR-001-jwt.md) | Auth architecture decision record |
+| [ADR-002-security.md](./docs/ADR-002-security.md) | Infrastructure security defaults |
+| [ADR-003-multi-framework.md](./docs/ADR-003-multi-framework.md) | Multi-framework routing decisions |
+
+---
+
+## Backup System
+
+```bash
+# Configure backup provider
+cp backup/config.sh backup/config.local.sh
+# Edit: BACKUP_PROVIDER=(local|s3|b2|rsync)
+
+# Backup now
+make backup
+
+# Restore
+make restore file=backup/postgresql_20260602_120000.sql.gz
 ```
 
 ---
 
 ## CI/CD
 
-### GitHub Actions Workflows
-
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| **CI** | push to master, PR | Test → Trivy scan → Build images |
-| **CD** | annotated tag `v*` | Build + push images to GHCR |
-
-### Docker Images
-
-Images are published to **GitHub Container Registry (GHCR)**:
+Images published to **GitHub Container Registry (GHCR)**:
 
 ```bash
-# Example: Pull tagged release
-docker pull ghcr.io/albertguedes/pypong/python:v0.10.1
+docker pull ghcr.io/albertguedes/pypong/flask:v0.10.1
 docker pull ghcr.io/albertguedes/pypong/webserver:v0.10.1
 docker pull ghcr.io/albertguedes/pypong/db:v0.10.1
 ```
 
----
-
-## Troubleshooting
-
-### Services won't start
-
-```bash
-# Check Docker is running
-docker info
-
-# View container logs
-make logs
-
-# Verify .env file exists
-cat .env
-```
-
-### Database connection fails
-
-```bash
-# Wait for DB to be ready
-pg_isready -h 127.0.0.1 -p 5432 -U docker
-
-# Shell into Python container
-make shell service=python
-```
-
-### Port already in use
-
-```bash
-# Find what's using port 8080
-lsof -i :8080
-```
+Workflows:
+- **CI** — on push/PR: lint, pytest inside containers, Trivy scan, Docker build
+- **CD** — on annotated tag `v*`: build + push to GHCR
 
 ---
 
-## Backup & Restore
+## Project Structure
 
-### Configuration
-
-Edit `backup/config.local.sh` to configure your backup destination:
-
-```bash
-# Choose provider: local, s3, b2, rsync
-BACKUP_PROVIDER=local
-
-# Optional GPG encryption
-# GPG_RECIPIENT="your@email.com"
-
-# S3 Configuration (if BACKUP_PROVIDER=s3)
-# S3_BUCKET="your-bucket"
-# S3_REGION="us-east-1"
-
-# Backblaze B2 (if BACKUP_PROVIDER=b2)
-# B2_ACCOUNT_ID=""
-# B2_APPLICATION_KEY=""
-# B2_BUCKET=""
 ```
-
-### Commands
-
-```bash
-# Backup database (local)
-make backup
-
-# Verify backup integrity
-bash backup/verify-restore.sh
-
-# Restore from backup
-make restore file=backup/postgresql_20260522_120000.sql.gz
+pypong/
+├── src/
+│   ├── flask/
+│   │   ├── app.py                # Flask + JWT API
+│   │   ├── requirements.txt
+│   │   ├── shared/                # auth.py, errors.py, tracing.py
+│   │   └── tests/
+│   ├── django/
+│   │   ├── myapp/views.py        # Django endpoints
+│   │   └── myproject/            # Django settings + urls
+│   ├── fastapi/
+│   │   └── main.py              # FastAPI endpoints
+│   └── index.html               # Dashboard UI
+├── webserver/nginx/            # nginx config (CORS, rate limit, proxy)
+├── database/                   # PostgreSQL Dockerfile
+├── python/                     # Shared Python Dockerfile (gunicorn)
+├── backup/                     # pg_dump + encrypt + sync scripts
+├── docs/                       # openapi.yaml, ADRs, DEPLOY, SECURITY
+├── compose.yaml               # 5-service orchestration
+├── Makefile                   # Developer commands
+└── .env.example               # Environment template
 ```
 
 ---
 
-## Security Notes
+## Tech Stack
 
-- Ports are bound to `127.0.0.1` (localhost only) by default
-- All credentials managed via environment variables
-- No secrets committed to version control
-- Host networking mode for inter-container communication
-- CI/CD includes Trivy vulnerability scanning
-- Backups can be encrypted with GPG
-
-**For production deployments**, consider:
-
-- Implementing Docker Secrets
-- Configuring SSL/TLS termination
-- Adding a reverse proxy with automatic certificate management
-- Enabling audit logging
-- Setting resource limits and quotas
+| Component | Technology |
+|-----------|------------|
+| WSGI Server | Gunicorn `--threads 4` (Flask/Django) |
+| ASGI Server | Uvicorn (FastAPI) |
+| Database | PostgreSQL 17 (Alpine) |
+| Reverse Proxy | nginx 1.27 (Alpine) |
+| Auth | PyJWT (HS256, SHA-256) |
+| Metrics | Prometheus text format |
+| Error tracking | Sentry SDK |
+| Image base | Alpine Linux 3.19+ |
+| Container user | `appuser` (uid 1000, non-root) |
 
 ---
 
 ## Contributing
 
-Contributions are welcome. Please see [CONTRIBUTING.md](./docs/CONTRIBUTING.md) for guidelines.
+See [CONTRIBUTING.md](./docs/CONTRIBUTING.md) for guidelines.
 
 ---
 
 ## License
 
-This project is distributed under the [MIT License](./LICENSE). See [LICENSE](./LICENSE) for more information.
+MIT. See [LICENSE](./LICENSE).

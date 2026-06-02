@@ -8,24 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **JWT Authentication**: All three frameworks (Flask, Django, FastAPI) now have `/v1/auth/register`, `/v1/auth/token`, and `/v1/protected` endpoints
-- **nginx Rate Limiting**: Auth routes limited to 10r/s (burst 20), API routes 100r/s (burst 200)
-- **CORS Preflight Headers**: Applied to all `/v1/` routes via nginx
-- **Documentation at /docs/**: nginx autoindex for all markdown and yaml docs
-- **nginx Gateway Section**: Homepage now shows nginx as the entry point, not Flask-centric
-
-### Fixed
-- **Django datetime.timedelta**: Fixed `datetime.timedelta` → `timedelta` import
-- **FastAPI JSONResponse status**: Fixed `JSONResponse(status=...)` → `JSONResponse(status_code=...)`
-- **Flask auth routes**: Changed from `/v1/` to `/flask/v1/` prefix
-- **nginx proxy_pass trailing slash**: Added trailing slash to Django/FastAPI v1 routes
-
-### Changed
-- **Homepage**: Now nginx-centric, showing all frameworks equally, gateway section with rate limiting info
-- **Flask routes**: All auth routes now under `/flask/v1/` (e.g., `/flask/v1/auth/register`)
-- **Tests**: Updated Flask tests to use `/flask/v1/` prefix
-
-### Added
 - **Multi-Framework Stack**: Added Django and FastAPI alongside Flask
   - Django container: `pypong-django-container` (port 8001)
   - FastAPI container: `pypong-fastapi-container` (port 8002)

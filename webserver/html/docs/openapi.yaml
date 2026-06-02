@@ -1,0 +1,203 @@
+openapi: 3.0.3
+info:
+  title: PYPONG API
+  description: |
+    Multi-framework Python Docker development environment with JWT authentication,
+    PostgreSQL database, and production-ready observability.
+
+    **Base URL:** `http://localhost:8080/v1`
+  version: 1.0.0
+  contact:
+    name: PYPONG Support
+    url: https://github.com/albertguedes/pypong
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080/v1
+    description: Local development server
+
+tags:
+  - name: Authentication
+    description: JWT-based authentication endpoints
+
+paths:
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register a new user
+      description: Creates a new user account. Password must be at least 8 characters.
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  minLength: 3
+                  maxLength: 64
+                  example: developer
+                password:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+                  example: securePassword123
+      responses:
+        "201":
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: User already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /auth/token:
+    post:
+      tags: [Authentication]
+      summary: Obtain access and refresh tokens
+      description: |
+        Authenticates with username and password credentials and returns
+        a JWT access token (15min TTL) and refresh token (7d TTL).
+      operationId: authenticateUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  example: developer
+                password:
+                  type: string
+                  example: securePassword123
+      responses:
+        "200":
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          description: Missing credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /protected:
+    get:
+      tags: [Authentication]
+      summary: Access a protected resource
+      description: |
+        Requires a valid JWT Bearer token in the Authorization header.
+        Returns user information extracted from the token.
+      operationId: getProtectedResource
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Access granted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProtectedResponse"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: AUTHENTICATION_FAILED
+            message:
+              type: string
+              example: Invalid username or password
+            details:
+              type: object
+              additionalProperties: true
+              example: {}
+
+    RegisterResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: User created
+        username:
+          type: string
+          example: developer
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: JWT access token (15 minute TTL)
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        refresh_token:
+          type: string
+          description: JWT refresh token (7 day TTL)
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        token_type:
+          type: string
+          enum: [Bearer]
+          example: Bearer
+        expires_in:
+          type: integer
+          description: Access token TTL in seconds
+          example: 900
+
+    ProtectedResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: You have access
+        user:
+          type: string
+          example: developer
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-06-02T21:55:45.123662+00:00"

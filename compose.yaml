@@ -1,7 +1,7 @@
 #
 # compose.yaml - PYPONG Docker Development Environment
 #
-# 3 containers: nginx + Python + postgresql
+# 5 services: nginx + Flask + Django + FastAPI + postgresql
 #
 services:
 
@@ -27,19 +27,79 @@ services:
 
         restart: unless-stopped
 
-    python:
+    flask:
         build:
-            context: ./src/
-            dockerfile: ../python/Dockerfile
+            context: ./src/flask/
+            dockerfile: ../../python/Dockerfile
 
-        image: python-image
-        container_name: pypong-python-container
+        image: flask-image
+        container_name: pypong-flask-container
 
         networks:
             - pypong-network
 
         ports:
             - "8000"
+
+        working_dir: /var/www
+
+        env_file:
+            - .env
+
+        environment:
+            - POSTGRES_HOST=pypong-postgresql-container
+            - POSTGRES_PORT=5432
+            - PGPORT=5432
+
+        depends_on:
+            - db
+
+        restart: unless-stopped
+
+    django:
+        build:
+            context: ./src/django/
+            dockerfile: ../../python/django.Dockerfile
+
+        image: django-image
+        container_name: pypong-django-container
+
+        networks:
+            - pypong-network
+
+        ports:
+            - "8001"
+
+        working_dir: /var/www
+
+        env_file:
+            - .env
+
+        environment:
+            - POSTGRES_HOST=pypong-postgresql-container
+            - POSTGRES_PORT=5432
+            - PGPORT=5432
+
+        depends_on:
+            - db
+
+        restart: unless-stopped
+
+    fastapi:
+        build:
+            context: ./src/fastapi/
+            dockerfile: ../../python/fastapi.Dockerfile
+
+        image: fastapi-image
+        container_name: pypong-fastapi-container
+
+        networks:
+            - pypong-network
+
+        ports:
+            - "8002"
+
+        working_dir: /var/www
 
         env_file:
             - .env
@@ -72,7 +132,9 @@ services:
             - ./src:/var/www/html:ro
 
         depends_on:
-            - python
+            - flask
+            - django
+            - fastapi
 
         restart: unless-stopped
 

@@ -1,12 +1,7 @@
 #
-# python.dockerfile - Python application image with Gunicorn
-#
-# Usage:
-#   docker build -t python-image ./python
+# Flask Dockerfile
 #
 FROM python:3.13-alpine
-
-ARG PYTHON_VERSION=3.13
 
 RUN addgroup -g 1000 appgroup && \
     adduser -u 1000 -G appgroup -s /bin/sh -D appuser
@@ -32,4 +27,4 @@ ENV POSTGRES_PORT=5432
 ENV POSTGRES_DB=dockerdb
 ENV POSTGRES_USER=docker
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--threads", "4", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "app:app"]

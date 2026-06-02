@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Flask image
+        run: |
+          docker compose build flask
+
+      - name: Build Django image
+        run: |
+          docker compose build django
+
+      - name: Build FastAPI image
+        run: |
+          docker compose build fastapi
+
+      - name: Build webserver image
+        run: |
+          docker compose build webserver
+
+      - name: Start services
+        run: |
+          docker compose up -d
+          sleep 10
+
+      - name: Run curl endpoint tests
+        run: |
+          echo "Testing Flask..."
+          curl -sf http://localhost:8080/flask/ || exit 1
+          curl -sf http://localhost:8080/flask/health || exit 1
+          curl -sf http://localhost:8080/flask/database || exit 1
+          curl -sf http://localhost:8080/flask/metrics || exit 1
+          curl -sf http://localhost:8080/flask/flask || exit 1
+
+          echo "Testing Django..."
+          curl -sf http://localhost:8080/django/ || exit 1
+          curl -sf http://localhost:8080/django/health || exit 1
+          curl -sf http://localhost:8080/django/database || exit 1
+          curl -sf http://localhost:8080/django/metrics || exit 1
+          curl -sf http://localhost:8080/django/django || exit 1
+
+          echo "Testing FastAPI..."
+          curl -sf http://localhost:8080/fastapi/ || exit 1
+          curl -sf http://localhost:8080/fastapi/health || exit 1
+          curl -sf http://localhost:8080/fastapi/database || exit 1
+          curl -sf http://localhost:8080/fastapi/metrics || exit 1
+          curl -sf http://localhost:8080/fastapi/fastapi || exit 1
+
+          echo "Testing PostgreSQL..."
+          docker exec pypong-postgresql-container pg_isready -U docker -d dockerdb || exit 1
+
+      - name: Run Flask pytest
+        run: |
+          docker exec pypong-flask-container pytest -v tests/
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: flask-image
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run secrets scan
+        run: |
+          if [ -f .env ]; then
+            echo "ERROR: .env file is present — secrets must not be committed"
+            exit 1
+          fi
+
+      - name: Check for secret patterns
+        run: |
+          grep -rE "(JIRA_API_TOKEN|ATLASSIAN_API_TOKEN|ghp_|gho_|github_pat_|aws_access_key|aws_secret_access_key|-----BEGIN.*PRIVATE KEY-----)" \
+            --include="*.py" --include="*.yaml" --include="*.yml" --include="*.sh" --include="*.md" \
+            . 2>/dev/null || true
+
+      - name: Trivy config scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-ref: .
+          scan-type: fs
+          format: sarif
+          output: trivy-config.sarif
+          severity: CRITICAL,HIGH
+
+      - name: Upload Trivy config results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: trivy-config.sarif

@@ -1,37 +1,44 @@
 # Architecture
 
-Technical documentation for the Minimal Viable Docker Development Environment (Python stack).
+Technical documentation for the Multi-Framework Python Docker Development Stack.
 
 ---
 
 ## Overview
 
-Three services run on a bridge network: **nginx** (HTTP), **Python/Flask** (application runtime via Gunicorn), and **PostgreSQL** (data). Nginx serves static files and proxies dynamic requests to Python on `127.0.0.1:8000`. Python connects to PostgreSQL on `127.0.0.1:5432` through the bridge network.
+**PYPONG** is a multi-framework Docker environment with three Python web frameworks (Flask, Django, FastAPI) running behind a single nginx reverse proxy. All frameworks share the same PostgreSQL database and expose identical `/v1/auth/*` JWT authentication endpoints.
 
-Only **Docker** and **Make** are required on the host; Python and pytest run inside the Python image.
+**Architecture:** nginx (8080) → Flask (8000) / Django (8001) / FastAPI (8002) → PostgreSQL (5432)
+
+Only **Docker** and **Make** are required on the host. Python and pytest run inside containers.
 
 ---
 
 ## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         HOST MACHINE                            │
-│                                                                 │
-│   localhost:8080  ── nginx (pypong-nginx-container)            │
-│                         │ proxy_pass 127.0.0.1:8000             │
-│                         ▼                                       │
-│   container:8000    ── Python/Gunicorn (pypong-python-container)│
-│                         │ psycopg2 172.x.x.x:5432                │
-│                         ▼                                       │
-│   localhost:5432    ── PostgreSQL (pypong-postgresql-container)  │
-│                        (exposed via bridge)                     │
-│                                                                 │
-│   ./src ──────────────────────▶ /var/www/html (ro)              │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         HOST MACHINE  (127.0.0.1:8080)                  │
+│                     nginx reverse proxy / load balancer                 │
+└──────────────────────────────────┬────────────────────────────────────┘
+                                   │
+         ┌─────────────────────────┼─────────────────────────┐
+         │                         │                         │
+         ▼                         ▼                         ▼
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Flask (8000)   │     │  Django (8001)  │     │  FastAPI (8002) │
+│  /flask/*       │     │  /django/*      │     │  /fastapi/*     │
+│  Gunicorn ts4   │     │  Gunicorn ts4   │     │  Uvicorn        │
+└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 ▼
+                    ┌─────────────────────────┐
+                    │     PostgreSQL 17         │
+                    │    (bridge network)      │
+                    │    pypong-data (vol)     │
+                    └─────────────────────────┘
 ```
-
-All services use **`bridge` network** with explicit port publishing. Services bind on `127.0.0.1` to avoid external exposure.
 
 ---
 
@@ -43,60 +50,91 @@ All services use **`bridge` network** with explicit port publishing. Services bi
 |----------|-------|
 | Image | nginx:1.27-alpine |
 | Container | pypong-nginx-container |
-| Listen | `127.0.0.1:8080` (configured in `webserver/nginx/default.conf`) |
+| Listen | `127.0.0.1:8080` |
 | Config | `webserver/nginx/default.conf`, `webserver/nginx/nginx.conf` |
-| Dockerfile | `webserver/Dockerfile` |
+| Static | `/usr/share/nginx/html/` (index.html + docs/) |
 
-**Responsibilities:**
+**nginx Responsibilities:**
 
-- Serve static files from `/var/www/html` (volume: `./src`, read-only)
-- Proxy `/health`, `/database`, `/metrics`, `/flask` to Python container
-- Inline `/` static index page (no Python needed)
+- Entry point for all HTTP traffic
+- Route `/flask/*` → Flask container (8000)
+- Route `/django/*` → Django container (8001)
+- Route `/fastapi/*` → FastAPI container (8002)
+- Serve `/docs/` with autoindex (markdown files)
+- Rate limiting (auth: 10r/s, API: 100r/s)
+- CORS headers on `/v1/` routes
+- Request ID propagation
 
 **Request flow:**
 
 ```
 Client → :8080 → nginx
-                 ├── / → /var/www/html/index.html (static)
-                 └── /health|/database|/metrics|/flask → :8000 → Python/Gunicorn
+         ├── / → /var/www/html/index.html (static homepage)
+         ├── /docs/* → /var/www/html/docs/* (autoindex)
+         ├── /flask/* → pypong-flask-container:8000
+         ├── /django/* → pypong-django-container:8001
+         └── /fastapi/* → pypong-fastapi-container:8002
 ```
 
-### 2. Python Application (Flask/Gunicorn)
+### 2. Flask Application
 
 | Property | Value |
 |----------|-------|
-| Image | python:3.13-alpine |
-| Container | pypong-python-container |
-| Listen | `0.0.0.0:8000` (Gunicorn, bound to container) |
-| Dockerfile | `python/Dockerfile` (build context: `./src/`) |
+| Image | flask-image (python:3.13-alpine) |
+| Container | pypong-flask-container |
+| Listen | `0.0.0.0:8000` (Gunicorn `--threads 4`) |
+| Dockerfile | `python/flask.Dockerfile` |
 | User | appuser (uid 1000) |
-| Dependencies | flask>=3.0.0, gunicorn>=23.0.0, psycopg2-binary>=2.9.0 |
+| Dependencies | flask>=3.0.0, gunicorn>=23.0.0, psycopg2-binary>=2.9.0, PyJWT, sentry-sdk |
 
-**Volumes:**
+**Flask Endpoints:**
 
-- `./src` → `/var/www` (app code + tests)
+| Path | Description |
+|------|-------------|
+| `/flask/` | Status page |
+| `/flask/health` | DB connectivity check |
+| `/flask/database` | DB connection test |
+| `/flask/metrics` | Prometheus metrics |
+| `/flask/v1` | API info |
+| `/flask/v1/auth/register` | User registration (POST) |
+| `/flask/v1/auth/token` | JWT token generation (POST) |
+| `/flask/v1/protected` | JWT-protected endpoint (GET) |
 
-**Environment (compose + `.env`):**
+### 3. Django Application
 
-| Variable | Default in compose | Description |
-|----------|-------------------|-------------|
-| POSTGRES_HOST | `pypong-postgresql-container` | Database host (bridge DNS) |
-| POSTGRES_PORT | `5432` | Database port |
-| POSTGRES_DB | from `.env` | Database name |
-| POSTGRES_USER | from `.env` | Database user |
-| POSTGRES_PASSWORD | from `.env` | Database password |
+| Property | Value |
+|----------|-------|
+| Image | django-image (python:3.13-alpine) |
+| Container | pypong-django-container |
+| Listen | `0.0.0.0:8001` (Gunicorn `--threads 4`) |
+| Dockerfile | `python/django.Dockerfile` |
+| User | appuser (uid 1000) |
+| Dependencies | django>=5.0.0, gunicorn>=23.0.0, psycopg2-binary>=2.9.0, PyJWT, sentry-sdk |
 
-### 3. Database (PostgreSQL)
+**Django Endpoints:** Same as Flask (with `/django/` prefix)
+
+### 4. FastAPI Application
+
+| Property | Value |
+|----------|-------|
+| Image | fastapi-image (python:3.13-alpine) |
+| Container | pypong-fastapi-container |
+| Listen | `0.0.0.0:8002` (Uvicorn) |
+| Dockerfile | `python/fastapi.Dockerfile` |
+| User | appuser (uid 1000) |
+| Dependencies | fastapi>=0.100.0, uvicorn[standard], psycopg2-binary>=2.9.0, PyJWT, sentry-sdk |
+
+**FastAPI Endpoints:** Same as Flask (with `/fastapi/` prefix)
+
+### 5. Database (PostgreSQL)
 
 | Property | Value |
 |----------|-------|
 | Image | postgres:17-alpine |
 | Container | pypong-postgresql-container |
-| Listen | `5432` (container), mapped to random host port |
-| Dockerfile | `database/Dockerfile` |
+| Listen | `5432` (container) |
 | Data | Docker volume `pypong-data` → `/var/lib/postgresql/data` |
-
-**Defaults:** database `dockerdb`, user `docker`, password from `.env`.
+| Defaults | db: `dockerdb`, user: `docker`, password: from `.env` |
 
 ---
 
@@ -104,48 +142,51 @@ Client → :8080 → nginx
 
 ### Bridge networking
 
-```yaml
-networks:
-  - pypong-network:  # bridge driver
-```
-
-Inter-service traffic uses **bridge network DNS**:
+All services use **`pypong-network`** bridge driver with DNS resolution:
 
 | From | To | Address |
 |------|-----|---------|
 | Browser | nginx | `http://127.0.0.1:8080` |
-| nginx | Python | `http://pypong-python-container:8000` |
-| Python | PostgreSQL | `pypong-postgresql-container:5432` |
-| Host tools | PostgreSQL | Use `docker compose port db 5432` to get mapped port |
-
-**Note:** `depends_on` orders container start but does **not** wait for PostgreSQL readiness; use `make test` or `pg_isready` manually.
+| nginx | Flask | `http://pypong-flask-container:8000` |
+| nginx | Django | `http://pypong-django-container:8001` |
+| nginx | FastAPI | `http://pypong-fastapi-container:8002` |
+| Flask/Django/FastAPI | PostgreSQL | `pypong-postgresql-container:5432` |
 
 ---
 
-## Data Flow
+## Authentication
 
-### Static content
+All three frameworks share identical JWT authentication:
 
-```
-Browser → http://127.0.0.1:8080/index.html
-       → nginx → /var/www/html/index.html
-```
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/flask/v1/auth/register` | POST | Create user (username, password min 8 chars) |
+| `/flask/v1/auth/token` | POST | Get access + refresh tokens |
+| `/flask/v1/protected` | GET | Protected resource (requires Bearer token) |
 
-### Dynamic endpoints (Python)
+JWT config: HS256, access token 15min TTL, refresh token 7 days.
 
-```
-Browser → http://127.0.0.1:8080/health
-       → nginx → proxy_pass pypong-python-container:8000
-       → Flask/Gunicorn handles request
-```
+---
 
-### Database (via Python/psycopg2)
+## Rate Limiting (nginx)
 
-```
-Browser → http://127.0.0.1:8080/database
-       → Python → psycopg2.connect(host=pypong-postgresql-container, ...)
-       → PostgreSQL
-```
+| Zone | Limit | Burst |
+|------|-------|-------|
+| `auth_limit` | 10r/s | 20 |
+| `api_limit` | 100r/s | 200 |
+
+---
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| POSTGRES_HOST | `pypong-postgresql-container` | Database host |
+| POSTGRES_PORT | `5432` | Database port |
+| POSTGRES_DB | `dockerdb` | Database name |
+| POSTGRES_USER | `docker` | Database user |
+| POSTGRES_PASSWORD | from `.env` | Database password |
+| JWT_SECRET | from `.env` | JWT signing key |
 
 ---
 
@@ -153,22 +194,22 @@ Browser → http://127.0.0.1:8080/database
 
 | Check | Command |
 |-------|---------|
-| HTTP | `curl -sf http://127.0.0.1:8080/health` |
+| HTTP | `curl -sf http://127.0.0.1:8080/` |
+| Flask | `curl -sf http://127.0.0.1:8080/flask/health` |
+| Django | `curl -sf http://127.0.0.1:8080/django/health` |
+| FastAPI | `curl -sf http://127.0.0.1:8080/fastapi/health` |
 | DB ready | `docker exec pypong-postgresql-container pg_isready -U docker -d dockerdb` |
-| Python ready | `curl -sf http://127.0.0.1:8080/flask` |
 | Full suite | `make test` |
 
 ---
 
-## Security Architecture
+## Security
 
 - Credentials in `.env` (gitignored), passed via `env_file`
-- Services listen on `127.0.0.1` (not exposed on all interfaces)
-- Python image runs as non-root user `appuser`
-- nginx mounts `src` read-only
-- No external ports exposed (port publishing is random for DB)
-
-**Production hardening (not included):** TLS termination, Docker Secrets, compose healthchecks.
+- Services listen on `127.0.0.1` (not exposed externally)
+- Python images run as non-root user `appuser`
+- nginx mounts `webserver/html/` read-only
+- Non-root containers throughout
 
 ---
 
@@ -176,22 +217,18 @@ Browser → http://127.0.0.1:8080/database
 
 | Service | Context | Dockerfile |
 |---------|---------|------------|
-| database | `./database/` | `Dockerfile` |
-| python | `./src/` | `../python/Dockerfile` |
 | webserver | `./webserver/` | `Dockerfile` |
-
----
-
-## CI/CD
-
-| Workflow | Trigger | Notes |
-|----------|---------|-------|
-| `ci.yml` | push/PR to `master` | Docker build, pytest inside container |
+| flask | `./src/flask/` | `../python/flask.Dockerfile` |
+| django | `./src/django/` | `../python/django.Dockerfile` |
+| fastapi | `./src/fastapi/` | `../python/fastapi.Dockerfile` |
+| database | `./database/` | `Dockerfile` |
 
 ---
 
 ## Future Considerations
 
 - Compose healthchecks with `depends_on: condition: service_healthy`
-- TLS reverse proxy, Redis sessions, read replicas
-- S3/B2 backup integration
+- Redis for sessions/caching
+- TLS termination at nginx
+- Docker Secrets for production
+- Read replicas for PostgreSQL
