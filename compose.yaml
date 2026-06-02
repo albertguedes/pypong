@@ -1,0 +1,86 @@
+#
+# compose.yaml - PYPONG Docker Development Environment
+#
+# 3 containers: nginx + Python + postgresql
+#
+services:
+
+    db:
+        build:
+            context: ./database/
+            dockerfile: Dockerfile
+
+        image: postgresql-image
+        container_name: pypong-postgresql-container
+
+        networks:
+            - pypong-network
+
+        ports:
+            - "5432"
+
+        env_file:
+            - .env
+
+        volumes:
+            - pypong-data:/var/lib/postgresql/data
+
+        restart: unless-stopped
+
+    python:
+        build:
+            context: ./src/
+            dockerfile: ../python/Dockerfile
+
+        image: python-image
+        container_name: pypong-python-container
+
+        networks:
+            - pypong-network
+
+        ports:
+            - "8000"
+
+        env_file:
+            - .env
+
+        environment:
+            - POSTGRES_HOST=pypong-postgresql-container
+            - POSTGRES_PORT=5432
+            - PGPORT=5432
+
+        depends_on:
+            - db
+
+        restart: unless-stopped
+
+    webserver:
+        build:
+            context: ./webserver/
+            dockerfile: Dockerfile
+
+        image: nginx-image
+        container_name: pypong-nginx-container
+
+        networks:
+            - pypong-network
+
+        ports:
+            - "127.0.0.1:8080:8080"
+
+        volumes:
+            - ./src:/var/www/html:ro
+
+        depends_on:
+            - python
+
+        restart: unless-stopped
+
+networks:
+
+    pypong-network:
+        driver: bridge
+
+volumes:
+
+    pypong-data:
