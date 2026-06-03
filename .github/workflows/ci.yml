@@ -70,10 +70,11 @@ jobs:
         run: |
           docker exec pypong-flask-container pytest -v tests/
 
-      - name: Trivy vulnerability scan
+      - name: Trivy filesystem scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: flask-image:latest
+          scan-ref: .
+          scan-type: fs
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
