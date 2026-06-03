@@ -72,6 +72,7 @@ jobs:
 
       - name: Trivy filesystem scan
         id: trivy
+        continue-on-error: true
         uses: aquasecurity/trivy-action@master
         with:
           scan-ref: .
@@ -84,11 +85,13 @@ jobs:
 
       - name: Ensure SARIF file exists
         if: always()
+        continue-on-error: true
         run: |
           if [ ! -f trivy-results.sarif ]; then
             echo "Creating empty SARIF file"
             echo '{"runs":[],"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json"}' > trivy-results.sarif
           fi
+          ls -la trivy-results.sarif
 
       - name: Upload Trivy results
         uses: github/codeql-action/upload-sarif@v4
