@@ -47,18 +47,21 @@ jobs:
           curl -sf http://localhost:8080/flask/health || exit 1
           curl -sf http://localhost:8080/flask/database || exit 1
           curl -sf http://localhost:8080/flask/metrics || exit 1
+          curl -sf http://localhost:8080/flask/v1 || exit 1
 
           echo "Testing Django..."
           curl -sf http://localhost:8080/django/ || exit 1
           curl -sf http://localhost:8080/django/health || exit 1
           curl -sf http://localhost:8080/django/database || exit 1
           curl -sf http://localhost:8080/django/metrics || exit 1
+          curl -sf http://localhost:8080/django/v1 || exit 1
 
           echo "Testing FastAPI..."
           curl -sf http://localhost:8080/fastapi/ || exit 1
           curl -sf http://localhost:8080/fastapi/health || exit 1
           curl -sf http://localhost:8080/fastapi/database || exit 1
           curl -sf http://localhost:8080/fastapi/metrics || exit 1
+          curl -sf http://localhost:8080/fastapi/v1 || exit 1
 
           echo "Testing PostgreSQL..."
           docker exec pypong-postgresql-container pg_isready -U docker -d dockerdb || exit 1
