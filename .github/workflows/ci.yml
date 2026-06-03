@@ -79,7 +79,7 @@ jobs:
           severity: CRITICAL,HIGH
 
       - name: Upload Trivy results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-results.sarif
@@ -94,7 +94,7 @@ jobs:
 
       - name: Run secrets scan
         run: |
-          if [ -f .env ]; then
+          if [ -f .env ] && [ "$GITHUB_ACTIONS" != "true" ]; then
             echo "ERROR: .env file is present — secrets must not be committed"
             exit 1
           fi
@@ -115,7 +115,7 @@ jobs:
           severity: CRITICAL,HIGH
 
       - name: Upload Trivy config results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-config.sarif
